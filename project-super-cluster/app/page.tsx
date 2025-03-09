@@ -10,7 +10,12 @@ export default function Home() {
   const startServer = async () => {
     setIsLoading(true)
     try {
-      const { data, error } = await supabase.functions.invoke('start-server')
+      const { data, error } = await supabase.functions.invoke('start-server', {
+        body: {},
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      })
       if (error) throw error
       setServerStatus('online')
     } catch (error) {
@@ -23,7 +28,12 @@ export default function Home() {
   const stopServer = async () => {
     setIsLoading(true)
     try {
-      const { data, error } = await supabase.functions.invoke('stop-server')
+      const { data, error } = await supabase.functions.invoke('stop-server', {
+        body: {},
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      })
       if (error) throw error
       setServerStatus('offline')
     } catch (error) {
@@ -35,7 +45,12 @@ export default function Home() {
 
   const updateDynDNS = async () => {
     try {
-      const { error } = await supabase.functions.invoke('update-dyndns')
+      const { error } = await supabase.functions.invoke('update-dyndns', {
+        body: {},
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      })
       if (error) throw error
       alert('DynDNS updated successfully')
     } catch (error) {

@@ -1,0 +1,8 @@
+[functions.start-server]
+verify_jwt = false
+
+[functions.stop-server]
+verify_jwt = false
+
+[functions.create-backup]
+verify_jwt = false 

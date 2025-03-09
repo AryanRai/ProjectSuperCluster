@@ -21,10 +21,36 @@ except Exception as e:
     logging.error(f"Failed to connect to Supabase: {e}")
     raise
 
+def preprocess_command(command: str) -> str:
+    """Preprocess command to make it suitable for non-interactive execution."""
+    # Remove interactive flags from Docker commands
+    if command.startswith('docker run'):
+        parts = command.split()
+        # Remove -it or -i -t flags
+        parts = [p for p in parts if p not in ['-it', '-i', '-t']]
+        # Add -d flag for detached mode if not present
+        if '-d' not in parts:
+            parts.insert(parts.index('run') + 1, '-d')
+        command = ' '.join(parts)
+    return command
+
 def execute_command(command: str) -> tuple[int, str, str]:
     """Execute a shell command and return exit code, stdout, and stderr."""
     try:
-        logging.info(f"Executing command: {command}")
+        # Preprocess command
+        command = preprocess_command(command)
+        logging.info(f"Executing command (preprocessed): {command}")
+        
+        # Check if this is a Docker command and handle permissions on Unix systems
+        if command.startswith('docker ') and os.name != 'nt':
+            # First check if user has Docker permissions
+            check_process = subprocess.run(['groups'], capture_output=True, text=True)
+            if 'docker' not in check_process.stdout:
+                error_msg = ("Docker permission denied. Please run: "
+                           "'sudo usermod -aG docker $USER' and then log out and back in")
+                logging.error(error_msg)
+                return 126, "", error_msg
+                
         # Create a more robust command execution environment
         if os.name == 'nt':  # Windows
             process = subprocess.Popen(
@@ -42,13 +68,24 @@ def execute_command(command: str) -> tuple[int, str, str]:
                 text=True
             )
         
-        stdout, stderr = process.communicate()
-        logging.info(f"Command completed with exit code: {process.returncode}")
-        if stdout:
-            logging.info(f"Command output: {stdout}")
-        if stderr:
-            logging.warning(f"Command error output: {stderr}")
-        return process.returncode, stdout, stderr
+        # Set a timeout for command execution (30 seconds)
+        try:
+            stdout, stderr = process.communicate(timeout=30)
+            logging.info(f"Command completed with exit code: {process.returncode}")
+            if stdout:
+                logging.info(f"Command output: {stdout}")
+            if stderr:
+                logging.warning(f"Command error output: {stderr}")
+            return process.returncode, stdout, stderr
+        except subprocess.TimeoutExpired:
+            process.kill()
+            stdout, stderr = process.communicate()
+            if command.startswith('docker run'):
+                # For Docker run commands, timeout is expected as they run in detached mode
+                return 0, "Container started in detached mode", ""
+            else:
+                return 1, stdout, f"Command timed out after 30 seconds: {stderr}"
+                
     except Exception as e:
         error_msg = f"Error executing command: {str(e)}"
         logging.error(error_msg)

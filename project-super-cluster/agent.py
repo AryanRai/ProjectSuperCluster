@@ -25,13 +25,23 @@ def execute_command(command: str) -> tuple[int, str, str]:
     """Execute a shell command and return exit code, stdout, and stderr."""
     try:
         logging.info(f"Executing command: {command}")
-        process = subprocess.Popen(
-            command,
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
+        # Create a more robust command execution environment
+        if os.name == 'nt':  # Windows
+            process = subprocess.Popen(
+                ['cmd', '/c', command],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+        else:  # Unix-like
+            process = subprocess.Popen(
+                ['bash', '-c', command],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+        
         stdout, stderr = process.communicate()
         logging.info(f"Command completed with exit code: {process.returncode}")
         if stdout:
@@ -40,8 +50,9 @@ def execute_command(command: str) -> tuple[int, str, str]:
             logging.warning(f"Command error output: {stderr}")
         return process.returncode, stdout, stderr
     except Exception as e:
-        logging.error(f"Error executing command: {e}")
-        return 1, "", str(e)
+        error_msg = f"Error executing command: {str(e)}"
+        logging.error(error_msg)
+        return 1, "", error_msg
 
 def process_commands():
     """Process pending commands from the server_commands table."""
@@ -51,6 +62,7 @@ def process_commands():
         response = supabase.table("server_commands") \
             .select("*") \
             .eq("status", "pending") \
+            .order('created_at', desc=False) \
             .execute()
         
         if not response.data:
@@ -60,21 +72,28 @@ def process_commands():
         logging.info(f"Found {len(response.data)} pending commands")
         
         for command in response.data:
-            logging.info(f"Processing command ID: {command['id']}")
+            command_id = command.get('id')
+            command_text = command.get('command', '').strip()
+            
+            if not command_text:
+                logging.warning(f"Empty command received for ID: {command_id}")
+                continue
+                
+            logging.info(f"Processing command ID: {command_id}: {command_text}")
             
             # Update status to processing
             try:
                 supabase.table("server_commands") \
                     .update({"status": "processing"}) \
-                    .eq("id", command["id"]) \
+                    .eq("id", command_id) \
                     .execute()
-                logging.info("Updated status to processing")
+                logging.info(f"Updated status to processing for command ID: {command_id}")
             except Exception as e:
-                logging.error(f"Error updating status to processing: {e}")
+                logging.error(f"Error updating status to processing for command ID {command_id}: {e}")
                 continue
             
             # Execute command
-            exit_code, stdout, stderr = execute_command(command["command"])
+            exit_code, stdout, stderr = execute_command(command_text)
             
             # Update command status and result
             status = "completed" if exit_code == 0 else "failed"
@@ -86,11 +105,11 @@ def process_commands():
                         "status": status,
                         "result": result
                     }) \
-                    .eq("id", command["id"]) \
+                    .eq("id", command_id) \
                     .execute()
-                logging.info(f"Command completed with status: {status}")
+                logging.info(f"Command {command_id} completed with status: {status}")
             except Exception as e:
-                logging.error(f"Error updating command result: {e}")
+                logging.error(f"Error updating result for command ID {command_id}: {e}")
             
     except Exception as e:
         logging.error(f"Error processing commands: {e}")
